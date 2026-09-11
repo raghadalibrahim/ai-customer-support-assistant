@@ -1,0 +1,509 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "customer-support",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1728,
+        -528
+      ],
+      "id": "7e66ca18-fa97-4ed5-ba79-6f4c49ce7951",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "945d1a38-3968-44d9-800c-2097c7c40604",
+              "name": "question",
+              "value": "={{ $json.body.question }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -1296,
+        -512
+      ],
+      "id": "10cbda2c-ad70-47fc-8f49-b799f320ad77",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "mode": "load",
+        "qdrantCollection": {
+          "__rl": true,
+          "value": "novashop_knowledge",
+          "mode": "list",
+          "cachedResultName": "novashop_knowledge"
+        },
+        "prompt": "={{ $json.question }}",
+        "topK": 5,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1.3,
+      "position": [
+        -976,
+        -368
+      ],
+      "id": "de64e92f-3e8f-4d38-ac1b-4445956dec39",
+      "name": "Qdrant Vector Store"
+    },
+    {
+      "parameters": {
+        "topK": 3
+      },
+      "type": "@n8n/n8n-nodes-langchain.retrieverVectorStore",
+      "typeVersion": 1,
+      "position": [
+        368,
+        -16
+      ],
+      "id": "d853a75a-43ac-4080-b948-d0d327a867d6",
+      "name": "Vector Store Retriever"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -1136,
+        -80
+      ],
+      "id": "6ac1f70b-9fa6-44cb-a664-2050022ad439",
+      "name": "Embeddings Google Gemini"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Question:\n{{ $json.question }}\n\nRetrieved Knowledge:\n{{ JSON.stringify($json.retrieved_documents) }}",
+        "options": {
+          "systemPromptTemplate": "You are the NovaShop customer support assistant.\n\nAnswer the customer's question using only the retrieved context.\n\nDo not use general knowledge, assumptions, or information not present in the retrieved context.\n\nIf the retrieved context does not contain enough information to answer the question, say:\n\"I don't have enough information in the available knowledge base to answer this question.\"\n\nNever invent policies, prices, product specifications, availability, shipping dates, refund decisions, or warranty coverage.\n\nThe AI assistant must not approve, promise, or initiate refunds.\n\nSensitive cases such as fraud, unauthorized transactions, account compromise, security incidents, disputed charges, or requests for exceptions must be escalated to a human support agent.\n\nRetrieved context:\n{context}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainRetrievalQa",
+      "typeVersion": 1.7,
+      "position": [
+        0,
+        -352
+      ],
+      "id": "fd4e01e7-ccc1-4760-b87f-86c4aea6ca28",
+      "name": "Question and Answer Chain"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        96,
+        64
+      ],
+      "id": "7572a27a-ea10-4678-88d7-842f88774dfe",
+      "name": "Google Gemini Chat Model"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst question = $('Edit Fields').first().json.question;\n\nconst sources = items.map(item => {\n  const doc = item.json.document;\n\n  return {\n    source: doc?.metadata?.source ?? \"unknown\",\n    content: doc?.pageContent ?? \"\",\n    score: typeof item.json.score === \"number\"\n      ? item.json.score\n      : null,\n    document: doc ?? null\n  };\n});\n\nlet conflict = false;\n\nconst isHoursQuestion =\n  /support hours|customer support hours|opening hours|working hours|when.*support.*available/i.test(question);\n\nif (isHoursQuestion) {\n  const company = sources.find(x => x.source === \"company.md\");\n  const faq = sources.find(x => x.source === \"faq.md\");\n\n  if (company && faq) {\n    const extractHours = (text) => {\n      const match = text.match(\n        /Monday to Friday from\\s+(\\d{2}:\\d{2})\\s+to\\s+(\\d{2}:\\d{2})/i\n      );\n\n      return match ? `${match[1]}-${match[2]}` : null;\n    };\n\n    const companyHours = extractHours(company.content);\n    const faqHours = extractHours(faq.content);\n\n    if (\n      companyHours &&\n      faqHours &&\n      companyHours !== faqHours\n    ) {\n      conflict = true;\n    }\n  }\n}\n\nconst validScores = sources\n  .map(x => x.score)\n  .filter(score => typeof score === \"number\");\n\nconst topScore = validScores.length\n  ? Math.max(...validScores)\n  : 0;\n\nconst confidence = Number(\n  Math.min(topScore / 0.75, 1).toFixed(2)\n);\n\nreturn [\n  {\n    json: {\n      question,\n      conflict_detected: conflict,\n      confidence,\n      top_retrieval_score: topScore,\n      sources_found: sources.map(x => x.source),\n      retrieved_documents: sources.map(x => x.document)\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -608,
+        -368
+      ],
+      "id": "bdb883a1-a7c0-4eb0-962f-d3cf9ef7258c",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "efa70e22-8820-4354-8abd-7f5fa8b495dd",
+              "leftValue": "={{ $json.conflict_detected }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -384,
+        -368
+      ],
+      "id": "dcc581ee-adb3-4a1e-977c-db613cfc62e8",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nconst sources = item.sources_found ?? [];\n\nreturn [\n  {\n    json: {\n      status: \"escalated\",\n      reason: \"Conflicting knowledge base information\",\n      priority: \"high\",\n      customer_question: $('Edit Fields').first().json.question,\n      conflict_detected: item.conflict_detected === true,\n      conflicting_sources: sources.filter(\n        source => source === \"company.md\" || source === \"faq.md\"\n      ),\n      message_to_agent:\n        \"The knowledge base contains conflicting information about customer support hours. Human review is required before responding to the customer.\"\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -96,
+        -656
+      ],
+      "id": "ce62e0d2-4fbe-41cd-92a1-ff2d5b165bed",
+      "name": "Prepare Human Escalation"
+    },
+    {
+      "parameters": {
+        "chatId": "<YOUR_TELEGRAM_CHAT_ID>",
+        "text": "=🚨 HUMAN ESCALATION  Priority: {{ $json.priority }}  Reason: {{ $json.reason }}  Customer Question: {{ $json.customer_question }}  Conflicting Sources: {{ $json.conflicting_sources.join(\", \") }}  Message: {{ $json.message_to_agent }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        400,
+        -800
+      ],
+      "id": "84876010-1662-4e72-a8c7-c99ec6d1095a",
+      "name": "Send a text message"
+    },
+    {
+      "parameters": {
+        "qdrantCollection": {
+          "__rl": true,
+          "value": "novashop_knowledge",
+          "mode": "list",
+          "cachedResultName": "novashop_knowledge"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1.3,
+      "position": [
+        400,
+        176
+      ],
+      "id": "394aa020-30d4-461b-b085-aa2f4fa399fd",
+      "name": "Qdrant Vector Store1"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        544,
+        368
+      ],
+      "id": "46d54f40-4709-4084-b8b1-9cc4ad728058",
+      "name": "Embeddings Google Gemini1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $json.response ?? \"\";\nconst retrieval = $('Code in JavaScript').first().json;\n\nconst question = retrieval.question ?? \"\";\n\nconst insufficient =\n  response.toLowerCase().includes(\n    \"i don't have enough information\"\n  );\n\nconst requiresHumanByRule =\n  /unauthorized|not authorized|account compromise|compromised account|someone accessed|fraud|duplicate charge|charged twice|disputed charge|payment dispute|security incident/i\n    .test(question);\n\nconst requiresHuman =\n  insufficient || requiresHumanByRule;\n\nreturn [\n  {\n    json: {\n      response,\n      status: insufficient\n        ? \"insufficient_knowledge\"\n        : requiresHumanByRule\n          ? \"human_escalation_required\"\n          : \"resolved\",\n      requires_human: requiresHuman,\n      confidence: insufficient\n        ? 0\n        : retrieval.confidence,\n      top_retrieval_score: retrieval.top_retrieval_score\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        -480
+      ],
+      "id": "b72958ea-4724-4b25-a9a1-5a7bafe7e4ff",
+      "name": "Decision & Guardrails"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "97afc0f4-1082-429e-8a1a-b4bac22b0afe",
+              "leftValue": "={{ $json.requires_human }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        784,
+        -480
+      ],
+      "id": "f7424fba-9ea7-4fe0-a397-514f91964790",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "chatId": "<YOUR_TELEGRAM_CHAT_ID>",
+        "text": "=🚨 HUMAN ESCALATION\n\nPriority: {{ $json.status === \"human_escalation_required\" ? \"HIGH\" : \"MEDIUM\" }}\n\nReason: {{ $json.status === \"human_escalation_required\" ? \"Sensitive or high-risk case requires human review\" : \"Insufficient information in the knowledge base\" }}\n\nCustomer Question:\n{{ $('Edit Fields').first().json.question }}\n\nAI Response:\n{{ $json.response }}\n\nRetrieval Confidence:\n{{ $json.confidence }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1200,
+        -464
+      ],
+      "id": "598a6431-d726-4f4e-a8e9-9fe45fcb34b9",
+      "name": "Send a text message1"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "fd5c9983-3db4-405b-b462-b4c1374eaa26",
+              "name": "customer_response",
+              "value": "={{ $json.response }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        944,
+        -160
+      ],
+      "id": "541731e6-54e5-43e2-a9af-07a02570e049",
+      "name": "Prepare Customer Response"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{\n  {\n    status: $json.status,\n    response: $json.customer_response,\n    confidence: $json.confidence,\n    escalated: $json.requires_human\n  }\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1168,
+        -160
+      ],
+      "id": "1522d485-efcf-4740-aec3-ffa3e85ffd67",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Qdrant Vector Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qdrant Vector Store": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "ai_embedding": [
+        []
+      ]
+    },
+    "Embeddings Google Gemini": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Qdrant Vector Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Prepare Human Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Question and Answer Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Human Escalation": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Question and Answer Chain": {
+      "main": [
+        [
+          {
+            "node": "Decision & Guardrails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector Store Retriever": {
+      "ai_retriever": [
+        [
+          {
+            "node": "Question and Answer Chain",
+            "type": "ai_retriever",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qdrant Vector Store1": {
+      "ai_vectorStore": [
+        [
+          {
+            "node": "Vector Store Retriever",
+            "type": "ai_vectorStore",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings Google Gemini1": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Qdrant Vector Store1",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Question and Answer Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision & Guardrails": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Send a text message1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Customer Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Customer Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
