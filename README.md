@@ -3,6 +3,7 @@
 
 ![Appointment Request Automation Workflow](2.png)
 
+
 An AI-powered customer support automation platform built with **n8n, Google Gemini, Qdrant, Docker, and Telegram**.
 
 The system combines **Retrieval-Augmented Generation (RAG)** with retrieval confidence evaluation, knowledge conflict detection, deterministic decision rules, safety guardrails, and human escalation.
