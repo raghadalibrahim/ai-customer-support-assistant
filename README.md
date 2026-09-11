@@ -1,4 +1,7 @@
 # Customer Support Assistant
+![Appointment Request Automation Workflow](1.png)
+
+![Appointment Request Automation Workflow](2.png)
 
 An AI-powered customer support automation platform built with **n8n, Google Gemini, Qdrant, Docker, and Telegram**.
 
